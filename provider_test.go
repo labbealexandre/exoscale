@@ -1,0 +1,267 @@
+package exoscale_test
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/labbealexandre/exoscale"
+	"github.com/libdns/libdns"
+)
+
+var (
+	apiKey        = ""
+	apiSecret     = ""
+	exoscale_zone = ""
+	zone          = ""
+	ttl           = time.Duration(120 * time.Second)
+)
+
+func TestMain(m *testing.M) {
+	apiKey = os.Getenv("EXOSCALE_API_KEY")
+	apiSecret = os.Getenv("EXOSCALE_API_SECRET")
+	exoscale_zone = os.Getenv("EXOSCALE_ZONE")
+	zone = os.Getenv("DNS_ZONE")
+	if len(apiKey) == 0 || len(apiSecret) == 0 || len(exoscale_zone) == 0 || len(zone) == 0 {
+		fmt.Println(`Please notice that this test runs agains the public Exoscale DNS API, so you sould never run the test with a zone used in production. To run this test, you have to specify the environment variables specified in provider_test.go`)
+		os.Exit(1)
+	}
+
+	os.Exit(m.Run())
+}
+
+type testRecordsCleanup = func()
+
+func setupTestRecords(t *testing.T, p *exoscale.Provider) ([]libdns.Record, testRecordsCleanup) {
+	testRecords := []libdns.Record{
+		{
+			Type:  "TXT",
+			Name:  "test1",
+			Value: "test1",
+			TTL:   ttl,
+		}, {
+			Type:  "TXT",
+			Name:  "test2",
+			Value: "test2",
+			TTL:   ttl,
+		}, {
+			Type:  "TXT",
+			Name:  "test3",
+			Value: "test3",
+			TTL:   ttl,
+		},
+	}
+
+	records, err := p.SetRecords(context.TODO(), zone, testRecords)
+	if err != nil {
+		t.Fatal(err)
+		return nil, func() {}
+	}
+
+	return records, func() {
+		cleanupRecords(t, p, records)
+	}
+}
+
+func cleanupRecords(t *testing.T, p *exoscale.Provider, r []libdns.Record) {
+	_, err := p.DeleteRecords(context.TODO(), zone, r)
+	if err != nil {
+		t.Fatalf("cleanup failed: %v", err)
+	}
+}
+
+func Test_GetRecords(t *testing.T) {
+	p := &exoscale.Provider{
+		APIKey:       apiKey,
+		APISecret:    apiSecret,
+		ExoscaleZone: exoscale_zone,
+	}
+
+	testRecords, cleanupFunc := setupTestRecords(t, p)
+	defer cleanupFunc()
+
+	records, err := p.GetRecords(context.TODO(), zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(records) < len(testRecords) {
+		t.Fatalf("len(records) < len(testRecords) => %d < %d", len(records), len(testRecords))
+	}
+
+	for _, testRecord := range testRecords {
+		var foundRecord *libdns.Record
+		for _, record := range records {
+			if testRecord.ID == record.ID {
+				foundRecord = &testRecord
+			}
+		}
+
+		if foundRecord == nil {
+			t.Fatalf("Record not found => %s", testRecord.ID)
+		}
+	}
+}
+
+func Test_DeleteRecords(t *testing.T) {
+	p := &exoscale.Provider{
+		APIKey:       apiKey,
+		APISecret:    apiSecret,
+		ExoscaleZone: exoscale_zone,
+	}
+
+	testRecords, cleanupFunc := setupTestRecords(t, p)
+	defer cleanupFunc()
+
+	records, err := p.GetRecords(context.TODO(), zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(records) < len(testRecords) {
+		t.Fatalf("len(records) < len(testRecords) => %d < %d", len(records), len(testRecords))
+	}
+
+	for _, testRecord := range testRecords {
+		var foundRecord *libdns.Record
+		for _, record := range records {
+			if testRecord.ID == record.ID {
+				foundRecord = &testRecord
+			}
+		}
+
+		if foundRecord == nil {
+			t.Fatalf("Record not found => %s", testRecord.ID)
+		}
+	}
+}
+
+func Test_SetRecords(t *testing.T) {
+	p := &exoscale.Provider{
+		APIKey:       apiKey,
+		APISecret:    apiSecret,
+		ExoscaleZone: exoscale_zone,
+	}
+
+	existingRecords, _ := setupTestRecords(t, p)
+	newTestRecords := []libdns.Record{
+		{
+			Type:  "TXT",
+			Name:  "newtest1",
+			Value: "newtest1",
+			TTL:   ttl,
+		},
+		{
+			Type:  "TXT",
+			Name:  "newtest2",
+			Value: "newtest2",
+			TTL:   ttl,
+		},
+	}
+
+	allRecords := append(existingRecords, newTestRecords...)
+	allRecords[0].Value = "newvalue"
+
+	records, err := p.SetRecords(context.TODO(), zone, allRecords)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanupRecords(t, p, records)
+
+	if len(records) != len(allRecords) {
+		t.Fatalf("len(records) != len(allRecords) => %d != %d", len(records), len(allRecords))
+	}
+
+	if records[0].Value != "newvalue" {
+		t.Fatalf(`records[0].Value != "newvalue" => %s != "newvalue"`, records[0].Value)
+	}
+}
+
+func Test_AppendRecords(t *testing.T) {
+	p := &exoscale.Provider{
+		APIKey:       apiKey,
+		APISecret:    apiSecret,
+		ExoscaleZone: exoscale_zone,
+	}
+
+	testCases := []struct {
+		records  []libdns.Record
+		expected []libdns.Record
+	}{
+		{
+			// multiple records
+			records: []libdns.Record{
+				{Type: "TXT", Name: "test_1", Value: "test_1", TTL: ttl},
+				{Type: "TXT", Name: "test_2", Value: "test_2", TTL: ttl},
+				{Type: "TXT", Name: "test_3", Value: "test_3", TTL: ttl},
+			},
+			expected: []libdns.Record{
+				{Type: "TXT", Name: "test_1", Value: "test_1", TTL: ttl},
+				{Type: "TXT", Name: "test_2", Value: "test_2", TTL: ttl},
+				{Type: "TXT", Name: "test_3", Value: "test_3", TTL: ttl},
+			},
+		},
+		{
+			// relative name
+			records: []libdns.Record{
+				{Type: "TXT", Name: "123.test", Value: "123", TTL: ttl},
+			},
+			expected: []libdns.Record{
+				{Type: "TXT", Name: "123.test", Value: "123", TTL: ttl},
+			},
+		},
+		{
+			// (fqdn) sans trailing dot
+			records: []libdns.Record{
+				{Type: "TXT", Name: fmt.Sprintf("123.test.%s", strings.TrimSuffix(zone, ".")), Value: "test", TTL: ttl},
+			},
+			expected: []libdns.Record{
+				{Type: "TXT", Name: "123.test", Value: "test", TTL: ttl},
+			},
+		},
+		{
+			// fqdn with trailing dot
+			records: []libdns.Record{
+				{Type: "TXT", Name: fmt.Sprintf("123.test.%s.", strings.TrimSuffix(zone, ".")), Value: "test", TTL: ttl},
+			},
+			expected: []libdns.Record{
+				{Type: "TXT", Name: "123.test", Value: "test", TTL: ttl},
+			},
+		},
+	}
+
+	for _, c := range testCases {
+		func() {
+			result, err := p.AppendRecords(context.TODO(), zone+".", c.records)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cleanupRecords(t, p, result)
+
+			if len(result) != len(c.records) {
+				t.Fatalf("len(resilt) != len(c.records) => %d != %d", len(c.records), len(result))
+			}
+
+			for k, r := range result {
+				if len(result[k].ID) == 0 {
+					t.Fatalf("len(result[%d].ID) == 0", k)
+				}
+				if r.Type != c.expected[k].Type {
+					t.Fatalf("r.Type != c.expected[%d].Type => %s != %s", k, r.Type, c.expected[k].Type)
+				}
+				if r.Name != c.expected[k].Name {
+					t.Fatalf("r.Name != c.expected[%d].Name => %s != %s", k, r.Name, c.expected[k].Name)
+				}
+				if r.Value != c.expected[k].Value {
+					t.Fatalf("r.Value != c.expected[%d].Value => %s != %s", k, r.Value, c.expected[k].Value)
+				}
+				if r.TTL != c.expected[k].TTL {
+					t.Fatalf("r.TTL != c.expected[%d].TTL => %s != %s", k, r.TTL, c.expected[k].TTL)
+				}
+			}
+		}()
+	}
+}

@@ -1,11 +1,10 @@
 // Package libdnstemplate implements a DNS record management client compatible
 // with the libdns interfaces for <PROVIDER NAME>. TODO: This package is a
 // template only. Customize all godocs for actual implementation.
-package libdnstemplate
+package exoscale
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/libdns/libdns"
 )
@@ -20,28 +19,66 @@ import (
 type Provider struct {
 	// TODO: put config fields here (with snake_case json
 	// struct tags on exported fields), for example:
-	APIToken string `json:"api_token,omitempty"`
+	APIKey       string `json:"api_key,omitempty"`
+	APISecret    string `json:"api_secret,omitempty"`
+	ExoscaleZone string `json:"api_secret,omitempty"`
+	client       Client
 }
 
 // GetRecords lists all the records in the zone.
 func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record, error) {
-	return nil, fmt.Errorf("TODO: not implemented")
+	res, err := p.getRecords(ctx, unFQDN(zone))
+	if err != nil {
+		return nil, err
+	}
+
+	return res, nil
 }
 
 // AppendRecords adds records to the zone. It returns the records that were added.
 func (p *Provider) AppendRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
-	return nil, fmt.Errorf("TODO: not implemented")
+	var res []libdns.Record
+	for _, record := range records {
+		createdRecord, err := p.createRecord(ctx, unFQDN(zone), record)
+		if err != nil {
+			return nil, err
+		}
+
+		res = append(res, createdRecord)
+	}
+
+	return res, nil
 }
 
 // SetRecords sets the records in the zone, either by updating existing records or creating new ones.
 // It returns the updated records.
 func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
-	return nil, fmt.Errorf("TODO: not implemented")
+	var res []libdns.Record
+	for _, record := range records {
+		updatedRecord, err := p.createOrUpdateRecord(ctx, unFQDN(zone), record)
+		if err != nil {
+			return nil, err
+		}
+
+		res = append(res, updatedRecord)
+	}
+
+	return res, nil
 }
 
 // DeleteRecords deletes the records from the zone. It returns the records that were deleted.
 func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
-	return nil, fmt.Errorf("TODO: not implemented")
+	var res []libdns.Record
+	for _, record := range records {
+		deletedRecord, err := p.deleteRecord(ctx, unFQDN(zone), record)
+		if err != nil {
+			return nil, err
+		}
+
+		res = append(res, deletedRecord)
+	}
+
+	return res, nil
 }
 
 // Interface guards
